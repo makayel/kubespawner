@@ -1060,7 +1060,8 @@ def make_service(
         kind='Service',
         metadata=metadata,
         spec=V1ServiceSpec(
-            type='ClusterIP',
+            # type='ClusterIP',
+            type='LoadBalancer',
             ports=[V1ServicePort(name='http', port=port, target_port=port)],
             selector=selector,
         ),

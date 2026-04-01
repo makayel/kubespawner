@@ -13,3 +13,4 @@ in your `jupyterhub_config.py` file.
 # instead of the more verbose import kubespawner.spawner.KubeSpawner.
 from ._version import __version__, version_info
 from .spawner import KubeSpawner
+from .multicluster.spawner import MultiClusterKubeSpawner
