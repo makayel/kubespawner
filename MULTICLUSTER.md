@@ -136,30 +136,70 @@ kubectl config --kubeconfig=~/.kube/config view --raw > /tmp/kube01-context
 cat /tmp/kube01-context /tmp/kube02-context > ~/.kube/config-multi
 ```
 
-### KubeSpawner Configuration
+### JupyterHub Multi-Cluster Configuration
 
-In your JupyterHub config (`jupyterhub_config.py`):
+Create `jupyterhub_multi_config.py` based on `jupyterhub_config.py` with the following changes:
 
-```python
-from traitlets.config import Config
+#### Key Differences from Base Configuration
 
-c.MultiClusterKubeSpawner.profile_list = [
-    {
-        'display_name': 'Cluster 1 (kube01)',
-        'slug': 'kube01',
-        'kubespawner_override': {
-            'kube_context': 'k0s-kube01',
-        },
-    },
-    {
-        'display_name': 'Cluster 2 (kube02)',
-        'slug': 'kube02',
-        'kubespawner_override': {
-            'kube_context': 'k0s-kube02',
-        },
-    },
-]
-```
+1. **Spawner Class**: Changed from `kubespawner.KubeSpawner` to `MultiClusterKubeSpawner`:
+   ```python
+   # jupyterhub_config.py (base)
+   c.JupyterHub.spawner_class = 'kubespawner.KubeSpawner'
+
+   # jupyterhub_multi_config.py (multi-cluster)
+   c.JupyterHub.spawner_class = 'kubespawner.multicluster.spawner.MultiClusterKubeSpawner'
+   ```
+
+2. **Profile-Based kube_context**: Each profile can specify a `kube_context` in `kubespawner_override`:
+   ```python
+   c.KubeSpawner.profile_list = [
+       {
+           'display_name': 'Cluster 1 - small',
+           'slug': 'c1.small',
+           'default': True,
+           'kubespawner_override': {
+               'kube_context': 'cluster01',  # <-- Cluster-specific context
+               'cpu_limit': 1,
+           }
+       },
+       {
+           'display_name': 'Cluster 2 - small',
+           'slug': 'c2.small',
+           'kubespawner_override': {
+               'kube_context': 'cluster02',  # <-- Different cluster
+               'cpu_limit': 1,
+           }
+       }
+   ]
+   ```
+
+3. **Storage Configuration** (optional): Enable persistent storage:
+   ```python
+   c.KubeSpawner.storage_pvc_ensure = True
+   c.KubeSpawner.storage_capacity = '1Gi'
+   c.KubeSpawner.pvc_name_template = 'claim-jupyterhub-{user_server}'
+   ```
+
+4. **Security Context** (optional): Set pod security context:
+   ```python
+   c.KubeSpawner.pod_security_context = {"fsGroup": 100}
+   c.KubeSpawner.container_security_context = {"runAsUser": 1000, "runAsGroup": 100}
+   ```
+
+5. **Named Servers** (recommended): Enable users to run multiple servers:
+   ```python
+   c.JupyterHub.allow_named_servers = True
+   ```
+
+6. **Services** (recommended for multi-cluster): Enable service creation:
+   ```python
+   c.KubeSpawner.services_enabled = True
+   ```
+
+#### Example `jupyterhub_multi_config.py`
+
+See `jupyterhub_multi_config.py` in the repository for a complete working example.
 
 ## Development Setup
 
