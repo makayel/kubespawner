@@ -1,18 +1,25 @@
 from ..reflector import ResourceReflector
 
 class MultiResourceReflector(ResourceReflector):
+    """
+    Base class for multi-cluster resource reflectors.
 
-  @property
-  def api(self):
-    return self.parent.api
+    This extends ResourceReflector to use the parent spawner's API client
+    instead of creating its own via shared_client, enabling per-cluster
+    reflectors.
+    """
 
-  @api.setter
-  def api(self, value):
-    pass
+    @property
+    def api(self):
+        """
+        Return the parent spawner's Kubernetes API client.
+        """
+        return self.parent.api
 
-  # @property
-  # def user_options(self):
-  #   return self.parent.user_options
+    @api.setter
+    def api(self, value):
+        """Setter is a no-op - api is set on the parent."""
+        pass
 
-  def __init__(self, *args, **kwargs):
-    super().__init__(*args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)

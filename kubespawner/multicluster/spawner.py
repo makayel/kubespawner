@@ -1,16 +1,15 @@
 import asyncio
 import sys
 
-from functools import partial
-from jupyterhub.utils import exponential_backoff
 from kubernetes_asyncio import client
 from kubernetes_asyncio.client.rest import ApiException
 from kubernetes_asyncio.config import kube_config
 from traitlets import Tuple, Type, Unicode
 from typing import Optional
+from unittest.mock import patch
 
 from .reflector import MultiResourceReflector
-from ..spawner import KubeSpawner
+from ..spawner import KubeSpawner, MockObject
 
 class PodReflector(MultiResourceReflector):
   """
@@ -85,7 +84,7 @@ class MultiClusterKubeSpawner(KubeSpawner):
   # Override
   def _get_reflector_key(self, kind: str) -> Tuple[str, str, str, Optional[str]]:
     if self.enable_user_namespaces:
-      # one reflector fo all namespaces
+      # one reflector for all namespaces
       return (self.kube_context, kind, None)
 
     return (self.kube_context, kind, self.namespace)
@@ -245,10 +244,16 @@ class MultiClusterKubeSpawner(KubeSpawner):
     Return a Kubernetes API client configured for the selected context.
     This avoids global state and allows multi-cluster support.
     """
-    for profile in self.profile_list:
-      if profile.get("slug") == self.user_options.get("profile"):
-        self.kube_context = profile['kubespawner_override']['kube_context']
-        return await kube_config.new_client_from_config(context=self.kube_context)
+    if self.profile_list:
+      for profile in self.profile_list:
+        if profile.get("slug") == self.user_options.get("profile"):
+          if 'kube_context' in profile.get('kubespawner_override', {}):
+            self.kube_context = profile['kubespawner_override']['kube_context']
+            return await kube_config.new_client_from_config(context=self.kube_context)
+
+    # Fallback: use default context if no profile match or kube_context not specified
+    self.kube_context = None
+    return await kube_config.new_client_from_config()
 
   async def _get_k8s_apis(self):
     """
@@ -264,8 +269,52 @@ class MultiClusterKubeSpawner(KubeSpawner):
     }
 
   # Spawner
+  # class MockObject:
+  #   pass
+
   def __init__(self, *args, **kwargs):
-    super().__init__(*args, **kwargs)
+    # Pop _mock before calling super().__init__() so it can be handled by parent
+    _mock = kwargs.pop('_mock', False)
+
+    # Set up mock objects BEFORE calling super().__init__() so parent can use them
+    # when expanding user properties
+    if _mock:
+      # runs during test execution only - set up mock objects
+      # if user is not provided, create a mock user
+      if 'user' not in kwargs:
+        user = MockObject()
+        user.name = 'mock@name'
+        user.id = 'mock_id'
+        user.url = 'mock_url'
+        kwargs['user'] = user
+
+      # if hub is not provided, create a mock hub
+      if 'hub' not in kwargs:
+        hub = MockObject()
+        hub.public_host = 'mock_public_host'
+        hub.url = 'mock_url'
+        hub.base_url = 'mock_base_url'
+        hub.api_url = 'mock_api_url'
+        kwargs['hub'] = hub
+
+      # Patch shared_client to return a mock object to avoid issues with
+      # requiring a running event loop
+      mock_api = MockObject()
+      import kubespawner.spawner
+      import kubespawner.clients
+
+      original_shared_client = kubespawner.clients.shared_client
+      kubespawner.clients.shared_client = lambda *args, **kwargs: mock_api
+      kubespawner.spawner.shared_client = lambda *args, **kwargs: mock_api
+
+      try:
+        super().__init__(*args, **kwargs)
+      finally:
+        # Restore original shared_client
+        kubespawner.clients.shared_client = original_shared_client
+        kubespawner.spawner.shared_client = original_shared_client
+    else:
+      super().__init__(*args, **kwargs)
 
   async def _get_service(self, timeout=600):
     for _ in range(timeout):
@@ -277,12 +326,30 @@ class MultiClusterKubeSpawner(KubeSpawner):
 
     raise TimeoutError(f"Service {self.pod_name} not in ### state after {timeout}s")
 
-  async def _custom_get_pod_url(self, pod=None):    
+  async def _custom_get_pod_url(self, pod=None):
+    """
+    Get pod URL from external load balancer service.
+
+    This method extracts the scheme, IP, and port from a Kubernetes Service
+    with an external load balancer. For services without load balancer ingress,
+    it falls back to the service cluster IP.
+    """
     service = await self._get_service()
 
-    self.multicluster_pod_scheme = service.spec.ports[0].name
-    self.multicluster_pod_ip = service.status.load_balancer.ingress[0].ip
-    self.multicluster_pod_port = service.spec.ports[0].port
+    # Get port info
+    port = service.spec.ports[0]
+    self.multicluster_pod_port = port.port
+
+    # Determine scheme from protocol (http/https)
+    port_protocol = getattr(port, 'protocol', 'TCP')
+    self.multicluster_pod_scheme = 'https' if port_protocol == 'TCP' else 'http'
+
+    # Get IP from load balancer ingress if available, otherwise use cluster IP
+    if service.status.load_balancer.ingress and len(service.status.load_balancer.ingress) > 0:
+      self.multicluster_pod_ip = service.status.load_balancer.ingress[0].ip
+    else:
+      # Fallback to service cluster IP if no external load balancer
+      self.multicluster_pod_ip = service.spec.cluster_ip
 
   async def _start(self):
     apis = await self._get_k8s_apis()
