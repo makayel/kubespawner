@@ -201,9 +201,35 @@ Create `jupyterhub_multi_config.py` based on `jupyterhub_config.py` with the fol
 
 See `jupyterhub_multi_config.py` in the repository for a complete working example.
 
+## Building the Package
+
+To build a package with multi-cluster support:
+
+```bash
+# Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install build tools
+pip install --upgrade build
+
+# Build the package
+python -m build
+```
+
+This creates:
+- `dist/jupyterhub_kubespawner-*.whl` - Wheel distribution
+- `dist/jupyterhub_kubespawner-*.tar.gz` - Source distribution
+
+To install the built package:
+
+```bash
+pip install dist/jupyterhub_kubespawner-*.whl
+```
+
 ## Development Setup
 
-### Install kubespawner with multi-cluster support
+### Install kubespawner with multi-cluster support (editable)
 
 ```bash
 # From the kubespawner repository
